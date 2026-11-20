@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MTR Fare Finder</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main>
+        <header>
+            <h1>MTR Fare Finder</h1>
+            <p>Choose your start and destination stations to see a suggested route and adult Octopus fare.</p>
+        </header>
+
+        <section class="card" aria-label="Find a route">
+            <form id="route-form">
+                <div class="fields">
+                    <div>
+                        <label for="start">Start station</label>
+                        <div class="station-picker">
+                            <input id="start" name="start" type="text" autocomplete="off" required
+                                placeholder="Type a station name" aria-autocomplete="list"
+                                aria-controls="start-suggestions" aria-expanded="false">
+                            <div class="suggestions" id="start-suggestions" role="listbox" hidden></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="destination">Destination station</label>
+                        <div class="station-picker">
+                            <input id="destination" name="destination" type="text" autocomplete="off" required
+                                placeholder="Type a station name" aria-autocomplete="list"
+                                aria-controls="destination-suggestions" aria-expanded="false">
+                            <div class="suggestions" id="destination-suggestions" role="listbox" hidden></div>
+                        </div>
+                    </div>
+                </div>
+                <button id="submit" type="submit">Find route and fare</button>
+                <p id="message" role="status" aria-live="polite"></p>
+            </form>
+        </section>
+
+        <section id="results" class="card results" aria-labelledby="results-heading" hidden>
+            <h2 id="results-heading">Route and fare</h2>
+            <div class="fare">
+                <span class="fare-label">Adult Octopus fare</span>
+                <span id="fare-price">—</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Leg</th>
+                        <th scope="col">Stations</th>
+                    </tr>
+                </thead>
+                <tbody id="legs"></tbody>
+            </table>
+        </section>
+    </main>
+    <script>
+        const form = document.querySelector("#route-form");
+        const submitButton = document.querySelector("#submit");
+        const message = document.querySelector("#message");
+        const results = document.querySelector("#results");
+        const farePrice = document.querySelector("#fare-price");
+        const legsBody = document.querySelector("#legs");
+
+        const createStationPicker = (inputId, suggestionsId) => {
+            const input = document.getElementById(inputId);
+            const suggestions = document.getElementById(suggestionsId);
+            let selectedStation = null;
+            let debounceTimer;
+            let requestNumber = 0;
+
+            const closeSuggestions = () => {
+                suggestions.hidden = true;
+                input.setAttribute("aria-expanded", "false");
+            };
+
+            const showMessage = (text, isError = false) => {
+                message.textContent = text;
+                message.dataset.error = String(isError);
+            };
+
+            input.addEventListener("input", () => {
+                selectedStation = null;
+                results.hidden = true;
+                const query = input.value.trim();
+                const currentRequest = ++requestNumber;
+                clearTimeout(debounceTimer);
+                closeSuggestions();
+
+                if (query.length < 2) {
+                    return;
+                }
+
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const response = await fetch(`/api/stations?query=${encodeURIComponent(query)}`);
+                        if (!response.ok) {
+                            throw new Error("Station search is unavailable. Please try again.");
+                        }
+                        const stations = await response.json();
+                        if (currentRequest !== requestNumber) {
+                            return;
+                        }
+                        suggestions.replaceChildren();
+                        stations.forEach((station) => {
+                            const option = document.createElement("button");
+                            option.type = "button";
+                            option.className = "suggestion";
+                            option.setAttribute("role", "option");
+
+                            const name = document.createElement("span");
+                            name.textContent = station.englishName;
+                            option.append(name);
+
+                            const code = document.createElement("span");
+                            code.className = "station-code";
+                            code.textContent = station.stationCode;
+                            option.append(code);
+
+                            if (station.chineseName) {
+                                const chinese = document.createElement("span");
+                                chinese.className = "chinese-name";
+                                chinese.textContent = station.chineseName;
+                                option.append(chinese);
+                            }
+
+                            option.addEventListener("click", () => {
+                                selectedStation = station;
+                                input.value = station.englishName;
+                                closeSuggestions();
+                                showMessage("");
+                            });
+                            suggestions.append(option);
+                        });
+                        if (stations.length === 0) {
+                            const empty = document.createElement("div");
+                            empty.className = "suggestion";
+                            empty.textContent = "No matching stations";
+                            suggestions.append(empty);
+                        }
+                        suggestions.hidden = false;
+                        input.setAttribute("aria-expanded", "true");
+                    } catch (error) {
+                        if (currentRequest === requestNumber) {
+                            closeSuggestions();
+                            showMessage(error.message, true);
+                        }
+                    }
+                }, 180);
+            });
+
+            input.addEventListener("keydown", (event) => {
+                if (event.key === "Escape") {
+                    closeSuggestions();
+                }
+            });
+
+            return {
+                getSelectedStation: () => selectedStation,
+                closeSuggestions
+            };
+        };
+
+        const startPicker = createStationPicker("start", "start-suggestions");
+        const destinationPicker = createStationPicker("destination", "destination-suggestions");
+
+        const readError = async (response, fallback) => {
+            try {
+                const body = await response.json();
+                return body.detail || body.message || fallback;
+            } catch {
+                return fallback;
+            }
+        };
+
+        const stationLabel = (station) => {
+            return `${station.englishName} (${station.stationCode})`;
+        };
+
+        const displayRoute = (route) => {
+            legsBody.replaceChildren();
+            if (route.legs.length === 0) {
+                const row = document.createElement("tr");
+                const cell = document.createElement("td");
+                cell.colSpan = 2;
+                cell.textContent = "You are already at your destination.";
+                row.append(cell);
+                legsBody.append(row);
+                return;
+            }
+
+            route.legs.forEach((leg) => {
+                const row = document.createElement("tr");
+                const lineCell = document.createElement("th");
+                lineCell.scope = "row";
+                lineCell.textContent = leg.line === "WALK" ? "Walk" : leg.line;
+
+                const stationsCell = document.createElement("td");
+                stationsCell.textContent = leg.stations.map(stationLabel).join(" → ");
+                row.append(lineCell, stationsCell);
+                legsBody.append(row);
+            });
+        };
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            startPicker.closeSuggestions();
+            destinationPicker.closeSuggestions();
+            const start = startPicker.getSelectedStation();
+            const destination = destinationPicker.getSelectedStation();
+            if (!start || !destination) {
+                message.textContent = "Choose both stations from the search suggestions.";
+                message.dataset.error = "true";
+                return;
+            }
+
+            submitButton.disabled = true;
+            message.textContent = "Finding your route…";
+            message.dataset.error = "false";
+            results.hidden = true;
+
+            try {
+                const params = new URLSearchParams({start: start.stationId, dest: destination.stationId});
+                const routeResponse = await fetch(`/api/route?${params}`);
+                if (!routeResponse.ok) {
+                    throw new Error(await readError(routeResponse, "Could not find a route."));
+                }
+                const route = await routeResponse.json();
+                displayRoute(route);
+                farePrice.textContent = route.fare
+                    ? `HK$${(route.fare.octAdultCents / 100).toFixed(2)}`
+                    : "Unavailable";
+                results.hidden = false;
+                message.textContent = "";
+            } catch (error) {
+                message.textContent = error.message || "Could not find a route. Please try again.";
+                message.dataset.error = "true";
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
