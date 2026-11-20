@@ -2,11 +2,13 @@ package com.example.fare;
 
 import com.example.fare.DataService.LineResponse;
 import com.example.fare.DataService.RouteResponse;
+import com.example.fare.DataService.Station;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,11 +25,25 @@ public class ApiController {
 		this.mtrDataService = mtrDataService;
 	}
 
+    @GetMapping("/stations")
+    @Operation(
+            summary = "Search stations by name or code",
+            description = "Returns stations whose English name, Chinese name, or station code contains the query.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Matching stations"),
+        @ApiResponse(responseCode = "400", description = "The search query is missing or blank")
+    })
+    public List<Station> stations(
+            @RequestParam @Parameter(description = "Partial station name or code", example = "Tuen Mu") String query) {
+        return mtrDataService.searchStations(query);
+    }
+
 	@GetMapping("/route")
 	@Operation(
 			summary = "Find a route with the fewest line changes",
 			description = "Finds a route by unique station IDs, minimizing line changes first and adjacent "
-					+ "station stops second. The route includes line legs to show transfers.")
+					+ "station stops second. The route includes line legs and fare categories in HK cents "
+                    + "when fare data is available.")
 	@ApiResponses({
 		@ApiResponse(responseCode = "200", description = "Route found"),
 		@ApiResponse(responseCode = "400", description = "A station ID is missing or blank"),

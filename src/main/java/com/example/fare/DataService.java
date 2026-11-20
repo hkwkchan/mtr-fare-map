@@ -28,17 +28,33 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class DataService {
 	private static final String STATIONS_RESOURCE = "data/mtr_lines_and_stations.csv";
+    private static final String FARES_RESOURCE = "data/mtr_lines_fares.csv";
 
 	private final Map<String, Station> stations;
 	private final Map<String, LineResponse> lines;
 	private final Map<String, List<Edge>> connections;
+    private final FareTable fareTable;
 
 	public DataService() {
 		LoadedData data = loadData();
 		stations = data.stations();
 		lines = data.lines();
 		connections = data.connections();
+        fareTable = FareTable.load(new ClassPathResource(FARES_RESOURCE));
 	}
+
+    public List<Station> searchStations(String query) {
+        if (query == null || query.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search query must not be blank");
+        }
+
+        String normalized = query.trim().toLowerCase(Locale.ROOT);
+        return stations.values().stream()
+                .filter(station -> station.englishName().toLowerCase(Locale.ROOT).contains(normalized)
+                        || station.chineseName().toLowerCase(Locale.ROOT).contains(normalized)
+                        || station.stationCode().toLowerCase(Locale.ROOT).contains(normalized))
+                .toList();
+    }
 
 	public LineResponse findLine(String lineCode) {
 		String normalizedCode = lineCode.trim().toUpperCase(Locale.ROOT);
@@ -85,7 +101,8 @@ public class DataService {
 				destinationStationId,
 				routeStations.size() - 1,
 				routeStations,
-				buildLegs(stationIds, linesByHop));
+				buildLegs(stationIds, linesByHop),
+                fareTable.find(startStationId, destinationStationId));
 	}
 
 	private RouteSearchNode findRouteWithFewestTransfers(String startStationId, String destinationStationId) {
@@ -287,7 +304,8 @@ public class DataService {
 			String destinationStationId,
 			int stopCount,
 			List<Station> stations,
-			List<RouteLeg> legs) {
+			List<RouteLeg> legs,
+            FareTable.FareResponse fare) {
 		public RouteResponse {
 			stations = List.copyOf(stations);
 			legs = List.copyOf(legs);

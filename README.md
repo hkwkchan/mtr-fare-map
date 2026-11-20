@@ -92,6 +92,18 @@ export SERVER_URL=http://localhost:8080
 ```
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+Search stations by partial English name, Chinese name, or station code:
+
+```text
+GET ${SERVER_URL}/api/stations?query=tuen%20mu
+```
+
+Searches are case-insensitive. Results include station IDs for use in route
+requests; a missing or blank query returns `400`.
+
+>>>>>>> 41af194 (Basic MTR route and fare web UI given start/end stations)
 Get a route with the fewest line changes by station ID:
 =======
 Get a lowest-cost route by station ID:
@@ -101,6 +113,7 @@ Get a lowest-cost route by station ID:
 GET ${SERVER_URL}/api/route?start=1&dest=3
 ```
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 The response includes the ordered station list, stop count, and line legs. A
 transfer station appears at the end of one leg and the start of the next. Unknown
@@ -112,6 +125,15 @@ available at `fare.octAdultCents`; if there is no matching fare row, `fare` is
 `null`. A transfer station appears at the end of one leg and the start of the
 next. Unknown station IDs and pairs with no connected route return `404`.
 >>>>>>> ac5c34e (Basic MTR route and fare web UI given start/end stations)
+=======
+The response includes the ordered station list, stop count, line legs, and a
+`fare` object with all fare categories in HK cents from
+`src/main/resources/data/mtr_lines_fares.csv`. The fare is `null` when the
+station pair has no fare data; the route remains available in that case. The
+page displays the adult Octopus fare. A transfer station appears at the end of
+one leg and the start of the next. Unknown station IDs and pairs with no
+connected route return `404`.
+>>>>>>> 41af194 (Basic MTR route and fare web UI given start/end stations)
 
 Get all unique stations for a line, along with its direction-specific station
 sequences (useful for lines with branches):

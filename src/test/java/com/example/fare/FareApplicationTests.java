@@ -28,6 +28,35 @@ class FareApplicationTests {
 	void contextLoads() {
 	}
 
+    @Test
+    void stationSearchSupportsNamesAndCodes() throws Exception {
+        HttpResponse<String> byName = get("/api/stations?query=tuen%20mu");
+        assertEquals(200, byName.statusCode());
+        assertTrue(byName.body().contains("\"stationId\":\"120\""));
+        assertTrue(byName.body().contains("\"stationCode\":\"TUM\""));
+        assertTrue(byName.body().contains("\"englishName\":\"Tuen Mun\""));
+        assertEquals(1, countOccurrences(byName.body(), "\"stationId\":\"120\""));
+
+        HttpResponse<String> byCode = get("/api/stations?query=tum");
+        assertEquals(200, byCode.statusCode());
+        assertTrue(byCode.body().contains("\"stationId\":\"120\""));
+
+        HttpResponse<String> byChineseName = get("/api/stations?query=%E5%B1%AF%E9%96%80");
+        assertEquals(200, byChineseName.statusCode());
+        assertTrue(byChineseName.body().contains("\"stationId\":\"120\""));
+
+        HttpResponse<String> noMatches = get("/api/stations?query=not-a-station");
+        assertEquals(200, noMatches.statusCode());
+        assertEquals("[]", noMatches.body());
+    }
+
+    @Test
+    void stationSearchRejectsMissingOrBlankQueries() throws Exception {
+        assertEquals(400, get("/api/stations").statusCode());
+        assertEquals(400, get("/api/stations?query=").statusCode());
+        assertEquals(400, get("/api/stations?query=%20%20").statusCode());
+    }
+
 	@Test
 	void routePrefersStayingOnOneLine() throws Exception {
 		HttpResponse<String> response = get("/api/route?start=1&dest=3");
@@ -68,7 +97,28 @@ class FareApplicationTests {
 		assertEquals(200, response.statusCode());
 		assertTrue(response.body().contains("\"stopCount\":0"));
 		assertTrue(response.body().contains("\"legs\":[]"));
+        assertTrue(response.body().contains("\"octAdultCents\":0"));
 	}
+
+    @Test
+    void routeIncludesAllFareCategories() throws Exception {
+        HttpResponse<String> response = get("/api/route?start=1&dest=3");
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"fare\":{\"startStationId\":\"1\",\"destinationStationId\":\"3\","
+                + "\"octAdultCents\":1060,\"octStudentCents\":540,\"octJoyyouSixtyCents\":210,"
+                + "\"singleAdultCents\":1250,\"octChildCents\":540,\"octElderlyCents\":210,"
+                + "\"octPwdCents\":210,\"singleChildCents\":550,\"singleElderlyCents\":550}"));
+    }
+
+    @Test
+    void routeReturnsNullWhenFareIsUnavailable() throws Exception {
+        HttpResponse<String> response = get("/api/route?start=44&dest=56");
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"line\":\"AEL\""));
+        assertTrue(response.body().contains("\"fare\":null"));
+    }
 
 	@Test
 	void lineReturnsAllUniqueStationsAndDirectionSequences() throws Exception {
