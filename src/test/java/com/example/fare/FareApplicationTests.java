@@ -29,6 +29,11 @@ class FareApplicationTests {
 	}
 
     @Test
+    void mcpIsDisabledByDefault() throws Exception {
+        assertEquals(404, get("/mcp").statusCode());
+    }
+
+    @Test
     void stationSearchSupportsNamesAndCodes() throws Exception {
         HttpResponse<String> byName = get("/api/stations?query=tuen%20mu");
         assertEquals(200, byName.statusCode());

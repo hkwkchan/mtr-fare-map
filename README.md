@@ -24,6 +24,53 @@ The `dev` Maven profile enables OpenAPI and Swagger UI at
 the documented endpoints interactively. Run without `-Pdev` to start the
 application without Swagger UI.
 
+## MCP server
+
+The application can expose its station search and route lookup as MCP tools
+over Streamable HTTP. MCP is disabled by default; enable the `mcp` Spring
+profile when starting the standalone server:
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.profiles=mcp
+```
+
+Or, after packaging, run `java -jar target/fare-1.0.0.jar --spring.profiles.active=mcp`.
+The MCP endpoint is `http://localhost:8080/mcp`. The existing `/api/*`
+endpoints remain available. This is a standalone HTTP server configuration;
+the existing Lambda/API Gateway deployment is not configured for MCP.
+
+For example, add this to VS Code's `.vscode/mcp.json` (or configure an
+equivalent Streamable HTTP connection in another MCP client):
+
+```json
+{
+  "servers": {
+    "mtr-fare-map": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+Start the application and connect the client, then ask its AI assistant
+something like “Tuen Mun to Kwun Tong”. The assistant can use:
+
+- `search_stations(query)` to find station names or codes and their IDs.
+- `get_route(start, dest)` to find a route using those IDs.
+
+The assistant should ask for missing or ambiguous stations. Searches use
+case-insensitive substring matching, not fuzzy matching. Routes minimize
+line changes before stops; fares are in HK cents and can be unavailable.
+The MCP server supplies tools and data, not an AI model or chat interface;
+you need an MCP-compatible AI client separately.
+
+The MCP profile binds the HTTP server to `127.0.0.1` by default, and the MCP
+endpoint has no authentication. For remote access, override `server.address`
+and put suitable authentication, HTTPS, and network protections in front of
+the server. Do not enable the MCP profile on the existing Lambda deployment
+without separately designing and validating that integration.
+
 ## Build
 
 Package the application as an executable JAR:
