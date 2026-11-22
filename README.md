@@ -1,6 +1,13 @@
 # mtr-fare-map
 MTR fare map
 
+After you find a route, the website displays the next available train arrivals
+at the start station for the route's first line and direction. These are
+real-time arrival estimates (up to four trains), provided by the
+[MTR real-time train information API](https://data.gov.hk/en-data/dataset/mtr-data2-nexttrain-data/resource/103472ed-01be-4dda-92c6-30530dee022f),
+not a full-day timetable; the feed is updated every 10 seconds and may be
+temporarily unavailable.
+
 ## Requirements
 
 - Java 21

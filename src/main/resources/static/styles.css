@@ -15,7 +15,7 @@ body {
 }
 
 main {
-    width: min(760px, 100%);
+    width: min(1024px, 100%);
     margin: 0 auto;
 }
 
@@ -39,6 +39,38 @@ header p {
     border-radius: 12px;
     background: white;
     box-shadow: 0 5px 20px rgb(23 33 43 / 5%);
+}
+
+.loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #526170;
+}
+
+.loading[hidden] {
+    display: none;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #dce3e9;
+    border-top-color: #1769aa;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spinner {
+        animation: none;
+    }
 }
 
 .fields {
@@ -111,12 +143,6 @@ input:focus {
     outline: none;
 }
 
-.station-code {
-    margin-left: 6px;
-    color: #647483;
-    font-size: 0.88em;
-}
-
 .chinese-name {
     margin-left: 5px;
     color: #526170;
@@ -152,6 +178,40 @@ input:focus {
 
 #message[data-error="true"] {
     color: #a12622;
+}
+
+#schedule-status {
+    margin: 0 0 14px;
+    color: #526170;
+}
+
+#schedule-status[data-error="true"] {
+    color: #a12622;
+}
+
+.schedule-line {
+    padding: 14px 0;
+    border-top: 1px solid #dce3e9;
+}
+
+.schedule-line h3 {
+    margin: 0 0 10px;
+}
+
+.schedule-direction {
+    display: grid;
+    grid-template-columns: minmax(70px, 0.3fr) 1fr;
+    gap: 8px 14px;
+    padding: 8px 0;
+}
+
+.schedule-direction h4,
+.schedule-direction p {
+    margin: 0;
+}
+
+.schedule-direction p {
+    padding-bottom: 6px;
 }
 
 .results {
@@ -193,6 +253,26 @@ table {
     border-collapse: collapse;
 }
 
+.station-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.route-station {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.route-station:not(:last-child)::after {
+    flex: none;
+    content: "→";
+}
+
 th,
 td {
     padding: 12px;
@@ -216,5 +296,10 @@ th {
 
     .fields {
         grid-template-columns: 1fr;
+    }
+
+    .schedule-direction {
+        grid-template-columns: 1fr;
+        gap: 4px;
     }
 }

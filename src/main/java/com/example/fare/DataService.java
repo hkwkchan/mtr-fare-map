@@ -28,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class DataService {
 	private static final String STATIONS_RESOURCE = "data/mtr_lines_and_stations.csv";
+	private static final String AIRPORT_EXPRESS_LINE_CODE = "AEL";
     private static final String FARES_RESOURCE = "data/mtr_lines_fares.csv";
 
 	private final Map<String, Station> stations;
@@ -54,6 +55,10 @@ public class DataService {
                         || station.chineseName().toLowerCase(Locale.ROOT).contains(normalized)
                         || station.stationCode().toLowerCase(Locale.ROOT).contains(normalized))
                 .toList();
+    }
+
+    public List<Station> allStations() {
+        return stations.values().stream().toList();
     }
 
 	public LineResponse findLine(String lineCode) {
@@ -206,6 +211,9 @@ public class DataService {
 					}
 					if (row.hasMissingValues()) {
 						throw new IOException("Expected 7 non-empty columns at CSV row " + lineNumber);
+					}
+					if (AIRPORT_EXPRESS_LINE_CODE.equals(row.lineCode())) {
+						continue;
 					}
 
 					Station station = new Station(
