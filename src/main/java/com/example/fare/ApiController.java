@@ -38,6 +38,13 @@ public class ApiController {
         return mtrDataService.searchStations(query);
     }
 
+    @GetMapping("/stations/all")
+    @Operation(summary = "List all stations", description = "Returns all stations for client-side searching.")
+    @ApiResponse(responseCode = "200", description = "All stations")
+    public List<Station> allStations() {
+        return mtrDataService.allStations();
+    }
+
 	@GetMapping("/route")
 	@Operation(
 			summary = "Find a route with the fewest line changes",

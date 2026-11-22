@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -60,6 +61,18 @@ class FareApplicationTests {
         assertEquals(400, get("/api/stations").statusCode());
         assertEquals(400, get("/api/stations?query=").statusCode());
         assertEquals(400, get("/api/stations?query=%20%20").statusCode());
+    }
+
+    @Test
+    void allStationsEndpointReturnsEveryStation() throws Exception {
+        HttpResponse<String> response = get("/api/stations/all");
+
+        assertEquals(200, response.statusCode());
+        assertEquals(95, countOccurrences(response.body(), "\"stationId\""));
+        assertTrue(response.body().contains("\"stationId\":\"120\""));
+        assertTrue(response.body().contains("\"stationCode\":\"TUM\""));
+        assertFalse(response.body().contains("\"stationId\":\"47\""));
+        assertFalse(response.body().contains("\"stationId\":\"56\""));
     }
 
 	@Test
@@ -117,23 +130,13 @@ class FareApplicationTests {
     }
 
     @Test
-    void routeReturnsNullWhenFareIsUnavailable() throws Exception {
-        HttpResponse<String> response = get("/api/route?start=44&dest=56");
-
-        assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("\"line\":\"AEL\""));
-        assertTrue(response.body().contains("\"fare\":null"));
+    void airportExpressStationsAreUnavailableWithoutFareData() throws Exception {
+        assertEquals(404, get("/api/route?start=44&dest=56").statusCode());
     }
 
 	@Test
-	void lineReturnsAllUniqueStationsAndDirectionSequences() throws Exception {
-		HttpResponse<String> response = get("/api/lines/ael");
-
-		assertEquals(200, response.statusCode());
-		assertTrue(response.body().contains("\"line\":\"AEL\""));
-		assertTrue(response.body().contains("\"directions\":[{\"direction\":\"DT\""));
-		assertTrue(response.body().contains("\"stationId\":\"56\""));
-		assertEquals(15, countOccurrences(response.body(), "\"stationId\""));
+	void airportExpressLineIsUnavailableWithoutFareData() throws Exception {
+		assertEquals(404, get("/api/lines/ael").statusCode());
 	}
 
 	@Test
