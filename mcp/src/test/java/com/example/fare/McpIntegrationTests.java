@@ -62,9 +62,12 @@ class McpIntegrationTests {
         assertEquals("120", journey.path("startStationId").asText());
         assertEquals("15", journey.path("destinationStationId").asText());
         assertTrue(journey.path("stopCount").asInt() > 0);
-        assertEquals("Tuen Mun", journey.path("stations").get(0).path("englishName").asText());
-        assertEquals("Kwun Tong", journey.path("stations").get(journey.path("stations").size() - 1)
-                .path("englishName").asText());
+        assertFalse(journey.has("stations"));
+        JsonNode legs = journey.path("legs");
+        JsonNode firstStations = legs.get(0).path("stations");
+        JsonNode lastStations = legs.get(legs.size() - 1).path("stations");
+        assertEquals("Tuen Mun", firstStations.get(0).path("englishName").asText());
+        assertEquals("Kwun Tong", lastStations.get(lastStations.size() - 1).path("englishName").asText());
         assertEquals(2490, journey.path("fare").path("octAdultCents").asInt());
 
         JsonNode missing = call(session, 6, "search_stations", "{\"query\":\"not-a-station\"}");

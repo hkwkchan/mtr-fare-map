@@ -6,18 +6,28 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.Environment;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class FareApplicationTests {
 	private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+	private static final ObjectMapper JSON = new ObjectMapper();
 
 	@Autowired
 	private Environment environment;
@@ -27,6 +37,41 @@ class FareApplicationTests {
 
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	@ExtendWith(OutputCaptureExtension.class)
+	void logsDataServiceInitializationTime(CapturedOutput output) {
+		new DataService();
+		assertTrue(output.getOut().matches("(?s).*DataService initialized in \\d+ ms.*"));
+	}
+
+	@Test
+	@ExtendWith(OutputCaptureExtension.class)
+	void logsApiRequestsWithoutQueryParameters(CapturedOutput output) throws Exception {
+		assertEquals(200, get("/api/route?start=1&dest=3").statusCode());
+		assertEquals(400, get("/api/stations?query=").statusCode());
+		assertEquals(200, get("/").statusCode());
+
+		String logs = output.getOut();
+		assertTrue(logs.matches("(?s).*API GET /api/route status=200 duration=\\d+ ms.*"));
+		assertTrue(logs.matches("(?s).*API GET /api/stations status=400 duration=\\d+ ms.*"));
+		assertFalse(logs.contains("start=1"));
+		assertFalse(logs.contains("query="));
+		assertEquals(2, countOccurrences(logs, "API GET "));
+	}
+
+	@Test
+	@ExtendWith(OutputCaptureExtension.class)
+	void logsUnhandledApiFailures(CapturedOutput output) {
+		MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/route");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		ApiRequestLoggingFilter filter = new ApiRequestLoggingFilter();
+
+		assertThrows(ServletException.class, () -> filter.doFilter(request, response, (req, res) -> {
+			throw new ServletException("test failure");
+		}));
+		assertTrue(output.getOut().matches("(?s).*API GET /api/route status=500 duration=\\d+ ms.*"));
 	}
 
     @Test
@@ -88,13 +133,52 @@ class FareApplicationTests {
 	}
 
 	@Test
+	void routeReturnsDirectionsForBothWays() throws Exception {
+		HttpResponse<String> outbound = get("/api/route?start=120&dest=119");
+		HttpResponse<String> inbound = get("/api/route?start=119&dest=120");
+
+		assertEquals(200, outbound.statusCode());
+		assertTrue(outbound.body().contains("\"line\":\"TML\",\"direction\":\"DT\""));
+		assertEquals(200, inbound.statusCode());
+		assertTrue(inbound.body().contains("\"line\":\"TML\",\"direction\":\"UT\""));
+	}
+
+	@Test
+	void routeResponseContainsStationsOnlyWithinLegs() throws Exception {
+		HttpResponse<String> response = get("/api/route?start=114&dest=15");
+		assertEquals(200, response.statusCode());
+		JsonNode route = JSON.readTree(response.body());
+		assertFalse(route.has("stations"));
+		assertEquals(14, route.path("stopCount").asInt());
+		JsonNode legs = route.path("legs");
+		assertEquals(2, legs.size());
+		JsonNode firstStations = legs.get(0).path("stations");
+		JsonNode lastStations = legs.get(1).path("stations");
+		assertEquals("114", firstStations.get(0).path("stationId").asText());
+		assertEquals("11", firstStations.get(firstStations.size() - 1).path("stationId").asText());
+		assertEquals("11", lastStations.get(0).path("stationId").asText());
+		assertEquals("15", lastStations.get(lastStations.size() - 1).path("stationId").asText());
+		assertTrue(route.has("fare"));
+	}
+
+	@Test
+	void branchDirectionsUseUtOrDt() {
+		DataService.RouteResponse route = dataService.findRoute("49", "57");
+
+		assertEquals(List.of("TKL"), route.legs().stream().map(DataService.RouteLeg::line).toList());
+		assertEquals(List.of("UT"), route.legs().stream().map(DataService.RouteLeg::direction).toList());
+		assertEquals(List.of("TIK", "TKO", "LHP"),
+				route.legs().get(0).stations().stream().map(DataService.Station::stationCode).toList());
+	}
+
+	@Test
 	void routeMinimizesTransfersBeforeStops() {
 		DataService.RouteResponse route = dataService.findRoute("53", "90");
 
 		assertEquals(9, route.stopCount());
 		assertEquals(List.of("TML"), route.legs().stream().map(DataService.RouteLeg::line).toList());
 		assertEquals(List.of("NAC", "AUS", "ETS", "HUH", "HOM", "TKW", "SUW", "KAT", "DIH", "HIK"),
-				route.stations().stream().map(DataService.Station::stationCode).toList());
+				route.legs().get(0).stations().stream().map(DataService.Station::stationCode).toList());
 	}
 
 	@Test
@@ -103,9 +187,11 @@ class FareApplicationTests {
 
 		assertEquals(12, route.stopCount());
 		assertEquals(List.of("TML", "KTL"), route.legs().stream().map(DataService.RouteLeg::line).toList());
-		assertEquals(List.of("NAC", "AUS", "ETS", "HUH", "HOM", "TKW", "SUW", "KAT", "DIH",
-				"CHH", "KOB", "NTK", "KWT"),
-				route.stations().stream().map(DataService.Station::stationCode).toList());
+		assertEquals(List.of("DT", "UT"), route.legs().stream().map(DataService.RouteLeg::direction).toList());
+		assertEquals(List.of("NAC", "AUS", "ETS", "HUH", "HOM", "TKW", "SUW", "KAT", "DIH"),
+				route.legs().get(0).stations().stream().map(DataService.Station::stationCode).toList());
+		assertEquals(List.of("DIH", "CHH", "KOB", "NTK", "KWT"),
+				route.legs().get(1).stations().stream().map(DataService.Station::stationCode).toList());
 	}
 
 	@Test
@@ -115,6 +201,7 @@ class FareApplicationTests {
 		assertEquals(200, response.statusCode());
 		assertTrue(response.body().contains("\"stopCount\":0"));
 		assertTrue(response.body().contains("\"legs\":[]"));
+		assertFalse(JSON.readTree(response.body()).has("stations"));
         assertTrue(response.body().contains("\"octAdultCents\":0"));
 	}
 

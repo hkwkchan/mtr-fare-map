@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,11 +38,13 @@ public final class FareTable {
     static FareTable load(Resource resource) {
         try {
             Map<String, Integer> indices = new LinkedHashMap<>();
+            List<FareCsvRow> csvRows = new ArrayList<>();
             readRows(resource, (row, line) -> {
                 validateId(row.startId(), line);
                 validateId(row.destId(), line);
                 indices.computeIfAbsent(row.startId(), ignored -> indices.size());
                 indices.computeIfAbsent(row.destId(), ignored -> indices.size());
+                csvRows.add(row);
             });
             if (indices.isEmpty()) {
                 throw new IOException("Fare CSV contains no rows");
@@ -55,7 +58,9 @@ public final class FareTable {
             }
             short[] fares = new short[length];
             Arrays.fill(fares, MISSING);
-            readRows(resource, (row, line) -> {
+            for (int rowIndex = 0; rowIndex < csvRows.size(); rowIndex++) {
+                FareCsvRow row = csvRows.get(rowIndex);
+                int line = rowIndex + 2;
                 int offset = (indices.get(row.startId()) * indices.size() + indices.get(row.destId())) * FARE_COUNT;
                 if (fares[offset] != MISSING) {
                     throw new IOException("Duplicate fare pair at CSV row " + line);
@@ -64,7 +69,7 @@ public final class FareTable {
                 for (int i = 0; i < FARE_COUNT; i++) {
                     fares[offset + i] = parseCents(values[i], line, HEADER.get(i + 4));
                 }
-            });
+            }
             return new FareTable(indices, fares);
         } catch (IOException exception) {
             throw new IllegalStateException("Unable to load MTR fare data from " + resource.getDescription(), exception);
