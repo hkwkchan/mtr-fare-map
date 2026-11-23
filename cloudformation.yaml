@@ -1,12 +1,122 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Private S3 website and HTTP API proxy for an existing MTR fare Lambda function.
+Description: Private S3 website, HTTP API, and MTR fare Lambda function.
 
 Parameters:
-  LambdaFunctionArn:
+  DeploymentBucket:
     Type: String
-    Description: ARN of the existing Lambda function, optionally qualified with a version or alias.
+    Description: Existing S3 bucket used to stage the Lambda ZIP and website files.
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key of the Lambda ZIP in the deployment bucket.
+  IndexHtmlKey:
+    Type: String
+    Description: S3 key of index.html in the deployment bucket.
+  StylesCssKey:
+    Type: String
+    Description: S3 key of styles.css in the deployment bucket.
+  AssetsVersion:
+    Type: String
+    Description: Change this value whenever the staged website files change.
 
 Resources:
+  FareLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  FareLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: java21
+      Handler: com.example.fare.StreamLambdaHandler
+      Role: !GetAtt FareLambdaExecutionRole.Arn
+      MemorySize: 1024
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref DeploymentBucket
+        S3Key: !Ref LambdaCodeKey
+
+  WebsiteAssetsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: CopyWebsiteAssets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${DeploymentBucket}/${IndexHtmlKey}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${DeploymentBucket}/${StylesCssKey}'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${WebsiteBucket}/index.html'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${WebsiteBucket}/styles.css'
+
+  WebsiteAssetsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt WebsiteAssetsExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+
+          s3 = boto3.client("s3")
+
+          def handler(event, context):
+              properties = event["ResourceProperties"]
+              website_bucket = properties["WebsiteBucket"]
+              assets = [
+                  (properties["IndexHtmlKey"], "index.html", "text/html; charset=utf-8"),
+                  (properties["StylesCssKey"], "styles.css", "text/css; charset=utf-8"),
+              ]
+              physical_id = event.get("PhysicalResourceId", "website-assets")
+
+              try:
+                  if event["RequestType"] == "Delete":
+                      for _, destination_key, _ in assets:
+                          s3.delete_object(Bucket=website_bucket, Key=destination_key)
+                  else:
+                      source_bucket = properties["DeploymentBucket"]
+                      for source_key, destination_key, content_type in assets:
+                          response = s3.get_object(Bucket=source_bucket, Key=source_key)
+                          s3.put_object(
+                              Bucket=website_bucket,
+                              Key=destination_key,
+                              Body=response["Body"].read(),
+                              ContentType=content_type,
+                          )
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+              except Exception:
+                  logging.exception("Failed to deploy website assets")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, physical_id)
+
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -18,7 +128,7 @@ Resources:
     Properties:
       ApiId: !Ref HttpApi
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Ref LambdaFunctionArn
+      IntegrationUri: !GetAtt FareLambdaFunction.Arn
       PayloadFormatVersion: '1.0'
 
   DefaultRoute:
@@ -42,9 +152,20 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref LambdaFunctionArn
+      FunctionName: !GetAtt FareLambdaFunction.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+
+  WebsiteAssets:
+    Type: Custom::WebsiteAssets
+    DependsOn: WebsiteBucketPolicy
+    Properties:
+      ServiceToken: !GetAtt WebsiteAssetsFunction.Arn
+      DeploymentBucket: !Ref DeploymentBucket
+      WebsiteBucket: !Ref WebsiteBucket
+      IndexHtmlKey: !Ref IndexHtmlKey
+      StylesCssKey: !Ref StylesCssKey
+      AssetsVersion: !Ref AssetsVersion
 
   WebsiteBucket:
     Type: AWS::S3::Bucket
@@ -112,6 +233,9 @@ Resources:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebsiteDistribution}'
 
 Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the deployed fare Lambda function.
+    Value: !GetAtt FareLambdaFunction.Arn
   ApiUrl:
     Description: Base URL of the HTTP API.
     Value: !GetAtt HttpApi.ApiEndpoint

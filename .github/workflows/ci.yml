@@ -1,0 +1,27 @@
+name: Maven CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: mvn --batch-mode clean package
+      - name: Check Lambda package excludes MCP
+        run: |
+          contents="$(unzip -Z1 fare/target/fare-1.0.0-lambda.zip)"
+          if printf '%s\n' "$contents" | grep -Ei '(^|/)(Mcp[^/]*\.class|application-mcp\.properties|[^/]*mcp[^/]*\.jar|spring-ai-[^/]*\.jar)$'; then
+            echo "Lambda package contains MCP files"
+            exit 1
+          fi

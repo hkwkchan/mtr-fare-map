@@ -62,11 +62,6 @@
             </table>
         </section>
 
-        <section id="start-schedule" class="card results" aria-labelledby="schedule-heading" hidden>
-            <h2 id="schedule-heading">Next trains at start station / 起點站班次</h2>
-            <p id="schedule-status" role="status" aria-live="polite"></p>
-            <div id="train-schedules"></div>
-        </section>
     </main>
     <script>
         const form = document.querySelector("#route-form");
@@ -76,9 +71,6 @@
         const results = document.querySelector("#results");
         const farePrice = document.querySelector("#fare-price");
         const legsBody = document.querySelector("#legs");
-        const startSchedule = document.querySelector("#start-schedule");
-        const scheduleStatus = document.querySelector("#schedule-status");
-        const trainSchedules = document.querySelector("#train-schedules");
         const stationInputs = [
             document.getElementById("start"),
             document.getElementById("destination")
@@ -129,21 +121,17 @@
         let scheduleRequest = 0;
         const clearStartSchedule = () => {
             scheduleRequest++;
-            startSchedule.hidden = true;
-            scheduleStatus.textContent = "";
-            trainSchedules.replaceChildren();
         };
 
         const updateStartSchedule = async (start, firstLeg) => {
             const currentRequest = ++scheduleRequest;
-            if (!start || !firstLeg || firstLeg.stations.length < 2) {
-                clearStartSchedule();
+            const scheduleStatus = legsBody.querySelector(".next-train");
+            if (!start || !firstLeg || firstLeg.stations.length < 2 || !scheduleStatus) {
                 return;
             }
-            startSchedule.hidden = false;
-            scheduleStatus.textContent = "Loading real-time train arrivals…";
+            scheduleStatus.textContent = "[Loading…]";
+            scheduleStatus.setAttribute("aria-label", "Loading next train arrival");
             scheduleStatus.dataset.error = "false";
-            trainSchedules.replaceChildren();
 
             try {
                 const lineResponse = await fetch(`/api/lines/${encodeURIComponent(firstLeg.line)}`);
@@ -188,41 +176,31 @@
                     return;
                 }
 
-                const lineSection = document.createElement("section");
-                lineSection.className = "schedule-line";
-                const lineHeading = document.createElement("h3");
-                lineHeading.textContent = `${firstLeg.line} · ${direction}`;
-                lineSection.append(lineHeading);
-
-                const directionSection = document.createElement("div");
-                directionSection.className = "schedule-direction";
-                const validTrains = (schedule[direction] || []).filter((train) => train.valid === "Y");
-                if (validTrains.length === 0) {
-                    const empty = document.createElement("p");
-                    empty.textContent = "No train arrivals currently available.";
-                    directionSection.append(empty);
-                }
-                validTrains.forEach((train) => {
-                    const arrival = document.createElement("p");
+                const train = (schedule[direction] || []).find((arrival) => arrival.valid === "Y");
+                const disruption = data.isdelay === "Y" ? " · Service disruption reported" : "";
+                const updated = `Updated ${schedule.curr_time || data.curr_time || "just now"}`;
+                if (train) {
                     const destination = stations.find((station) => station.stationCode === train.dest);
                     const destinationName = destination ? stationLabel(destination) : train.dest;
                     const minutes = Number(train.ttnt);
-                    const arrivalTime = Number.isFinite(minutes) && train.ttnt !== ""
+                    const arrivalTime = train.ttnt != null && String(train.ttnt).trim() !== "" && Number.isFinite(minutes)
                         ? `${minutes} min`
                         : (train.time || "").split(" ")[1]?.slice(0, 5) || "Time unavailable";
-                    arrival.textContent = `${arrivalTime} · Platform ${train.plat} · To ${destinationName}`;
-                    directionSection.append(arrival);
-                });
-                lineSection.append(directionSection);
-                trainSchedules.append(lineSection);
-
-                scheduleStatus.textContent = `Updated ${schedule.curr_time || data.curr_time || "just now"}`
-                    + (data.isdelay === "Y" ? " · Service disruption reported." : "");
+                    scheduleStatus.textContent = `[${arrivalTime}${disruption}]`;
+                    scheduleStatus.title = `Next train: ${arrivalTime} · Platform ${train.plat} · To ${destinationName}`
+                        + ` · ${updated}${disruption}`;
+                } else {
+                    scheduleStatus.textContent = `[No arrivals${disruption}]`;
+                    scheduleStatus.title = `No train arrivals currently available · ${updated}${disruption}`;
+                }
+                scheduleStatus.setAttribute("aria-label", scheduleStatus.title);
             } catch (error) {
                 if (currentRequest !== scheduleRequest) {
                     return;
                 }
-                scheduleStatus.textContent = error.message || "Train schedules are temporarily unavailable.";
+                scheduleStatus.textContent = "[Arrivals unavailable]";
+                scheduleStatus.title = error.message || "Train schedules are temporarily unavailable.";
+                scheduleStatus.setAttribute("aria-label", scheduleStatus.title);
                 scheduleStatus.dataset.error = "true";
             }
         };
@@ -231,15 +209,38 @@
             const input = document.getElementById(inputId);
             const suggestions = document.getElementById(suggestionsId);
             let selectedStation = null;
+            let activeIndex = -1;
 
             const closeSuggestions = () => {
                 suggestions.hidden = true;
                 input.setAttribute("aria-expanded", "false");
+                input.removeAttribute("aria-activedescendant");
+                activeIndex = -1;
             };
 
             const showMessage = (text, isError = false) => {
                 message.textContent = text;
                 message.dataset.error = String(isError);
+            };
+
+            const setActiveOption = (index) => {
+                const options = [...suggestions.querySelectorAll('[role="option"]')];
+                if (options.length === 0) {
+                    activeIndex = -1;
+                    input.removeAttribute("aria-activedescendant");
+                    return;
+                }
+
+                activeIndex = (index + options.length) % options.length;
+                options.forEach((option, optionIndex) => {
+                    const isActive = optionIndex === activeIndex;
+                    option.classList.toggle("active", isActive);
+                    option.setAttribute("aria-selected", String(isActive));
+                });
+
+                const activeOption = options[activeIndex];
+                input.setAttribute("aria-activedescendant", activeOption.id);
+                activeOption.scrollIntoView({block: "nearest"});
             };
 
             const showSuggestions = () => {
@@ -250,6 +251,7 @@
                 }
                 const query = input.value.trim();
                 closeSuggestions();
+                activeIndex = -1;
 
                 if (query.length < 1) {
                     return;
@@ -261,11 +263,13 @@
                     && [station.englishName, station.chineseName, station.stationCode]
                         .some((value) => value.toLowerCase().includes(normalizedQuery)));
                 suggestions.replaceChildren();
-                matches.forEach((station) => {
+                matches.forEach((station, index) => {
                     const option = document.createElement("button");
                     option.type = "button";
                     option.className = "suggestion";
                     option.setAttribute("role", "option");
+                    option.id = `${suggestionsId}-option-${index}`;
+                    option.setAttribute("aria-selected", "false");
 
                     const name = document.createElement("span");
                     name.textContent = station.englishName;
@@ -278,13 +282,16 @@
                         option.append(chinese);
                     }
 
-                    option.addEventListener("click", () => {
+                    const selectStation = () => {
                         selectedStation = station;
                         input.value = stationLabel(station);
                         closeSuggestions();
                         showMessage("");
                         onUpdate();
-                    });
+                    };
+
+                    option.addEventListener("click", selectStation);
+                    option.addEventListener("mouseenter", () => setActiveOption(index));
                     suggestions.append(option);
                 });
                 if (matches.length === 0) {
@@ -308,6 +315,36 @@
             input.addEventListener("keydown", (event) => {
                 if (event.key === "Escape") {
                     closeSuggestions();
+                    return;
+                }
+
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    const options = suggestions.querySelectorAll('[role="option"]');
+                    if (options.length === 0) {
+                        return;
+                    }
+                    event.preventDefault();
+                    if (suggestions.hidden) {
+                        showSuggestions();
+                    }
+                    const availableOptions = suggestions.querySelectorAll('[role="option"]');
+                    if (availableOptions.length === 0) {
+                        return;
+                    }
+                    if (event.key === "ArrowDown") {
+                        setActiveOption(activeIndex + 1);
+                    } else {
+                        setActiveOption(activeIndex < 0 ? availableOptions.length - 1 : activeIndex - 1);
+                    }
+                    return;
+                }
+
+                if (event.key === "Enter" && activeIndex >= 0) {
+                    const activeOption = suggestions.querySelectorAll('[role="option"]')[activeIndex];
+                    if (activeOption) {
+                        event.preventDefault();
+                        activeOption.click();
+                    }
                 }
             });
 
@@ -358,7 +395,7 @@
                 return;
             }
 
-            route.legs.forEach((leg) => {
+            route.legs.forEach((leg, legIndex) => {
                 const row = document.createElement("tr");
                 const lineCell = document.createElement("th");
                 lineCell.scope = "row";
@@ -367,10 +404,19 @@
                 const stationsCell = document.createElement("td");
                 const stationGrid = document.createElement("div");
                 stationGrid.className = "station-grid";
-                leg.stations.forEach((station) => {
+                leg.stations.forEach((station, stationIndex) => {
                     const stationItem = document.createElement("span");
                     stationItem.className = "route-station";
-                    stationItem.textContent = stationLabel(station);
+                    const stationName = document.createElement("span");
+                    stationName.textContent = stationLabel(station);
+                    if (legIndex === 0 && stationIndex === 0 && leg.stations.length >= 2) {
+                        const nextTrain = document.createElement("span");
+                        nextTrain.className = "next-train";
+                        nextTrain.setAttribute("role", "status");
+                        nextTrain.setAttribute("aria-live", "polite");
+                        stationName.append(nextTrain);
+                    }
+                    stationItem.append(stationName);
                     stationGrid.append(stationItem);
                 });
                 stationsCell.append(stationGrid);

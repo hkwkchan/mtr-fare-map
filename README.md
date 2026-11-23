@@ -1,12 +1,28 @@
 # mtr-fare-map
 MTR fare map
 
-After you find a route, the website displays the next available train arrivals
-at the start station for the route's first line and direction. These are
-real-time arrival estimates (up to four trains), provided by the
-[MTR real-time train information API](https://data.gov.hk/en-data/dataset/mtr-data2-nexttrain-data/resource/103472ed-01be-4dda-92c6-30530dee022f),
-not a full-day timetable; the feed is updated every 10 seconds and may be
-temporarily unavailable.
+After you find a route from start and destination stations, the website displays the route with all passing-by stations and next available train arrival time. A live demo hosting in AWS is at https://daxb9x65xvxw4.cloudfront.net.
+
+The real-time estimate is provided by the
+[MTR real-time train information API](https://data.gov.hk/en-data/dataset/mtr-data2-nexttrain-data/resource/103472ed-01be-4dda-92c6-30530dee022f), which is updated every 10 seconds.
+Route and fare data are sourced from the MTR open data CSVs:
+[MTR Lines (except Light Rail) & Stations](https://data.gov.hk/en-data/dataset/mtr-data-routes-fares-barrier-free-facilities/resource/8daba4fe-b879-4a51-8962-27b4cffdc61c)
+and
+[MTR Lines (except Airport Express & Light Rail) Fares](https://data.gov.hk/en-data/dataset/mtr-data-routes-fares-barrier-free-facilities/resource/be9afb46-0c72-4e1c-8b15-07059d5541a7).
+
+## Code structure
+
+- [Root `pom.xml`](pom.xml) defines the parent Maven build for both modules.
+- [`fare/`](fare/) contains the web API, website, and AWS Lambda handler.
+  Its [`com.example.fare` package](fare/src/main/java/com/example/fare/)
+  also holds the shared station search, routing, and fare logic
+  (`DataService` and `FareTable`). Station and fare data and website files are
+  in [`fare/src/main/resources/`](fare/src/main/resources/).
+- [`mcp/`](mcp/) depends on `fare` and adds the MCP tool definitions and
+  configuration in its [`com.example.fare` package](mcp/src/main/java/com/example/fare/).
+  There is no separate common module; MCP reuses the shared code in `fare`.
+- Each module has its own tests under `src/test/java`. The Lambda assembly
+  descriptor is in [`fare/src/assembly/`](fare/src/assembly/).
 
 ## Requirements
 
@@ -23,7 +39,7 @@ mvn -version
 ## Run the application
 
 ```bash
-mvn spring-boot:run -Pdev
+mvn -pl fare spring-boot:run -Pdev
 ```
 
 The `dev` Maven profile enables OpenAPI and Swagger UI at
@@ -33,21 +49,17 @@ application without Swagger UI.
 
 ## MCP server
 
-The application can expose its station search and route lookup as MCP tools
-over Streamable HTTP. MCP is disabled by default; enable the `mcp` Spring
-profile when starting the standalone server:
+The separate MCP module exposes station search and route lookup as MCP tools
+over Streamable HTTP. Build both modules, then enable the `mcp` Spring profile
+when starting the standalone server:
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=mcp
+mvn clean package
+java -jar mcp/target/fare-mcp-1.0.0.jar --spring.profiles.active=mcp
 ```
 
-Or, after packaging, run `java -jar target/fare-1.0.0.jar --spring.profiles.active=mcp`.
-The MCP endpoint is `http://localhost:8080/mcp`. The existing `/api/*`
-endpoints remain available. This is a standalone HTTP server configuration;
-the existing Lambda/API Gateway deployment is not configured for MCP.
-
-For example, add this to VS Code's `.vscode/mcp.json` (or configure an
-equivalent Streamable HTTP connection in another MCP client):
+The MCP endpoint is `http://localhost:8080/mcp`, which can be added to VS Code's `.vscode/mcp.json` (or configure an
+equivalent Streamable HTTP connection in another MCP client for an AI tool):
 
 ```json
 {
@@ -61,7 +73,7 @@ equivalent Streamable HTTP connection in another MCP client):
 ```
 
 Start the application and connect the client, then ask its AI assistant
-something like “Tuen Mun to Kwun Tong”. The assistant can use:
+something like "Tuen Mun to Kwun Tong" or "TM to KwunTong". The assistant can use:
 
 - `search_stations(query)` to find station names or codes and their IDs.
 - `get_route(start, dest)` to find a route using those IDs.
@@ -69,101 +81,6 @@ something like “Tuen Mun to Kwun Tong”. The assistant can use:
 The assistant should ask for missing or ambiguous stations. Searches use
 case-insensitive substring matching, not fuzzy matching. Routes minimize
 line changes before stops; fares are in HK cents and can be unavailable.
-The MCP server supplies tools and data, not an AI model or chat interface;
-you need an MCP-compatible AI client separately.
-
-The MCP profile binds the HTTP server to `127.0.0.1` by default, and the MCP
-endpoint has no authentication. For remote access, override `server.address`
-and put suitable authentication, HTTPS, and network protections in front of
-the server. Do not enable the MCP profile on the existing Lambda deployment
-without separately designing and validating that integration.
-
-## Build
-
-Package the application as an executable JAR:
-
-```bash
-mvn clean package
-```
-
-The default build does not include Swagger UI. Do not enable `-Pdev` when
-building the production JAR.
-
-The JAR is created at `target/fare-1.0.0.jar`. Run it with:
-
-```bash
-java -jar target/fare-1.0.0.jar
-```
-
-The same build also creates `target/fare-1.0.0-lambda.zip` for AWS
-Lambda. Upload this ZIP as the function code, select a Java 21 runtime, and set
-the handler to `com.example.fare.StreamLambdaHandler`. Configure API Gateway to
-send Lambda proxy payloads in version 1.0 format. The ZIP contains application
-classes at its root and runtime dependencies in `lib/`; keep using the
-executable JAR for local runs.
-
-### Deploy the website and HTTP API
-
-The [CloudFormation template](cloudformation.yaml) creates a private S3 bucket
-and an HTTPS CloudFront distribution for the website, plus an HTTP API for an
-existing Lambda function. CloudFront serves the static files from S3 and sends
-`/api/*` requests to API Gateway on the same origin, so the frontend does not
-need cross-origin requests. The HTTP API uses a `$default` route and stage, a
-Lambda proxy integration with payload format 1.0, and permission for that API
-to invoke the function. The template does not create or update the Lambda
-function or reuse an existing API.
-
-The API stage has a best-effort throttle of 10 requests per second with a burst
-of 30, shared across callers rather than per user. Excess requests can receive
-HTTP 429. This is not a spending cap and does not limit CloudFront requests
-for static files; adjust `DefaultRouteSettings` for your expected traffic.
-
-First upload the Lambda ZIP and configure the function as described above.
-Then deploy or update the stack in the same AWS account and Region as the
-Lambda, using AWS CLI credentials allowed to manage S3, CloudFront and API
-Gateway resources and the Lambda function's resource-based policy:
-
-```bash
-aws cloudformation deploy \
-  --stack-name mtr-fare-api \
-  --template-file cloudformation.yaml \
-  --parameter-overrides LambdaFunctionArn=arn:aws:lambda:REGION:ACCOUNT_ID:function:FUNCTION_NAME \
-  --region REGION
-```
-
-Replace the ARN and Region with your own values. You can also supply a
-version- or alias-qualified function ARN; the API will invoke that qualifier.
-CloudFront deployment can take several minutes. Find the bucket name and
-website URL in the stack's **Outputs** tab or with:
-
-```bash
-aws cloudformation describe-stacks --stack-name mtr-fare-api --region REGION \
-  --query "Stacks[0].Outputs" --output table
-```
-
-CloudFormation creates the bucket but does not upload the site. Replace
-`WEBSITE_BUCKET_NAME` with the `WebsiteBucketName` output and upload both files:
-
-```bash
-aws s3 cp src/main/resources/static/index.html s3://WEBSITE_BUCKET_NAME/index.html \
-  --content-type 'text/html; charset=utf-8' --region REGION
-aws s3 cp src/main/resources/static/styles.css s3://WEBSITE_BUCKET_NAME/styles.css \
-  --content-type 'text/css; charset=utf-8' --region REGION
-```
-
-Open the `WebsiteUrl` output in your browser. The distribution serves
-`index.html` at `/` and forwards its API calls to the existing Lambda through
-API Gateway. Both behaviors disable CloudFront caching, so re-upload the files
-after editing them. Test the API through the website domain with:
-
-```bash
-curl 'https://YOUR_CLOUDFRONT_DOMAIN/api/stations?query=Central'
-```
-
-The `ApiUrl` output remains available for direct API access; use `WebsiteUrl`
-to serve the frontend from S3 instead of Lambda. The website and API are
-publicly accessible unless you configure authorization separately. Empty the
-website bucket before deleting the stack, or CloudFormation cannot delete it.
 
 ## Test
 
@@ -172,3 +89,100 @@ Run the test suite with Maven:
 ```bash
 mvn test
 ```
+
+To run only the Lambda integration test:
+
+```bash
+mvn -pl fare -Dtest=LambdaIntegrationTests test
+```
+
+## Build
+
+Build both modules and package the application:
+
+```bash
+mvn clean package
+```
+
+The standalone fare JAR is created at `fare/target/fare-1.0.0-exec.jar`. Run it with:
+
+```bash
+java -jar fare/target/fare-1.0.0-exec.jar
+```
+
+The same build also creates `fare/target/fare-1.0.0-lambda.zip` for AWS
+Lambda. The CloudFormation stack deploys it with the Java 21 runtime and
+`com.example.fare.StreamLambdaHandler` handler. The ZIP contains application
+classes at its root and runtime dependencies in `lib/`, without MCP code or
+dependencies; keep using the executable JAR for local runs.
+
+### Deploy the website and HTTP API
+
+The [CloudFormation template](cloudformation.yaml) creates a private S3 bucket
+and an HTTPS CloudFront distribution for the website, an HTTP API, and the
+Java 21 Lambda function. CloudFront serves the static files from S3 and sends
+`/api/*` requests to API Gateway on the same origin, so the frontend does not
+need cross-origin requests. The HTTP API uses a `$default` route and stage, a
+Lambda proxy integration with payload format 1.0, and permission for that API
+to invoke the function. A CloudFormation custom resource copies the staged
+`index.html` and `styles.css` into the website bucket.
+
+The API stage has a best-effort throttle of 10 requests per second with a burst
+of 30, shared across callers rather than per user. Excess requests can receive
+HTTP 429. Adjust `DefaultRouteSettings` for your expected traffic.
+
+Build the project with `mvn clean package`. Before deploying, upload the Lambda
+ZIP and website files to an existing S3 deployment bucket in the stack's
+Region. Set these values for your deployment:
+
+```bash
+export REGION=YOUR_AWS_REGION
+export DEPLOYMENT_BUCKET=YOUR_EXISTING_DEPLOYMENT_BUCKET
+export LAMBDA_VERSION=1.0.0
+export ASSETS_VERSION=1
+export LAMBDA_CODE_KEY="lambda/${LAMBDA_VERSION}/fare-${LAMBDA_VERSION}-lambda.zip"
+```
+
+Upload the artifacts to the deployment bucket:
+
+```bash
+aws s3 cp "fare/target/fare-${LAMBDA_VERSION}-lambda.zip" \
+  "s3://${DEPLOYMENT_BUCKET}/${LAMBDA_CODE_KEY}" --region "${REGION}"
+aws s3 cp fare/src/main/resources/static/index.html \
+  "s3://${DEPLOYMENT_BUCKET}/site/index.html" --region "${REGION}"
+aws s3 cp fare/src/main/resources/static/styles.css \
+  "s3://${DEPLOYMENT_BUCKET}/site/styles.css" --region "${REGION}"
+```
+
+Then deploy or update the stack using AWS CLI credentials allowed to manage
+CloudFormation, IAM roles, Lambda, S3, CloudFront and API Gateway:
+
+```bash
+aws cloudformation deploy \
+  --stack-name mtr-fare-api \
+  --template-file cloudformation.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    DeploymentBucket="${DEPLOYMENT_BUCKET}" \
+    LambdaCodeKey="${LAMBDA_CODE_KEY}" \
+    IndexHtmlKey=site/index.html \
+    StylesCssKey=site/styles.css \
+    AssetsVersion="${ASSETS_VERSION}" \
+  --region "${REGION}"
+```
+
+Use a new `LAMBDA_VERSION` for each new Lambda ZIP so CloudFormation updates
+the function. Change `ASSETS_VERSION` whenever you upload updated website
+files so CloudFormation reruns the asset copy. CloudFront deployment can take
+several minutes.
+
+Find the bucket name, Lambda ARN and website URL in the
+stack's **Outputs** tab or with the AWS CLI below:
+
+```bash
+aws cloudformation describe-stacks --stack-name mtr-fare-api --region "${REGION}" \
+  --query "Stacks[0].Outputs" --output table
+```
+
+Open the `WebsiteUrl` output in your browser. You can also find the
+website domain in the AWS Console under **CloudFront** > **Distributions**
