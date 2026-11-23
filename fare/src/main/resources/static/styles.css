@@ -138,7 +138,8 @@ input:focus {
 }
 
 .suggestion:hover,
-.suggestion:focus {
+.suggestion:focus,
+.suggestion.active {
     background: #eef6fc;
     outline: none;
 }
@@ -178,40 +179,6 @@ input:focus {
 
 #message[data-error="true"] {
     color: #a12622;
-}
-
-#schedule-status {
-    margin: 0 0 14px;
-    color: #526170;
-}
-
-#schedule-status[data-error="true"] {
-    color: #a12622;
-}
-
-.schedule-line {
-    padding: 14px 0;
-    border-top: 1px solid #dce3e9;
-}
-
-.schedule-line h3 {
-    margin: 0 0 10px;
-}
-
-.schedule-direction {
-    display: grid;
-    grid-template-columns: minmax(70px, 0.3fr) 1fr;
-    gap: 8px 14px;
-    padding: 8px 0;
-}
-
-.schedule-direction h4,
-.schedule-direction p {
-    margin: 0;
-}
-
-.schedule-direction p {
-    padding-bottom: 6px;
 }
 
 .results {
@@ -273,6 +240,16 @@ table {
     content: "→";
 }
 
+.next-train {
+    margin-left: 4px;
+    color: #17613b;
+    font-weight: 700;
+}
+
+.next-train[data-error="true"] {
+    color: #a12622;
+}
+
 th,
 td {
     padding: 12px;
@@ -296,10 +273,5 @@ th {
 
     .fields {
         grid-template-columns: 1fr;
-    }
-
-    .schedule-direction {
-        grid-template-columns: 1fr;
-        gap: 4px;
     }
 }
