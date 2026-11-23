@@ -1,5 +1,6 @@
 package com.example.fare;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -12,6 +13,7 @@ import com.fasterxml.jackson.dataformat.csv.CsvSchema;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.InputStreamResource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -73,10 +75,22 @@ class FareTableTests {
     }
 
     @Test
+    void loadsFromSingleUseStream() {
+        String reverseRow = "B,2,A,1,6.00,3.20,2.00,5.00,3.20,2.00,2.00,3.50,3.50\n";
+        InputStreamResource resource = new InputStreamResource(
+                new ByteArrayInputStream((HEADER + ROW + reverseRow).getBytes(StandardCharsets.UTF_8)));
+        FareTable table = FareTable.load(resource);
+        assertEquals(490, table.find("1", "2").octAdultCents());
+        assertEquals(600, table.find("2", "1").octAdultCents());
+    }
+
+    @Test
     void rejectsMalformedData() {
         assertInvalid("wrong,header\n1,2\n", "header");
         assertInvalid(HEADER, "no rows");
-        assertInvalid(HEADER + ROW + ROW, "Duplicate");
+        assertInvalid(HEADER + ROW + ROW, "Duplicate fare pair at CSV row 3");
+        assertInvalid(HEADER + ROW + ROW.replace("A,1,B,2", "B,2,A,1").replace("4.90", "-0.01"),
+                "at CSV row 3");
         assertInvalid(HEADER + ROW.replace("A,1,B,2", "A,,B,2"), "station ID");
         assertInvalid(HEADER + ROW.replace("4.90", "-0.01"), "Invalid fare");
         assertInvalid(HEADER + ROW.replace("4.90", "4.901"), "Invalid fare");

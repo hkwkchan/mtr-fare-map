@@ -49,7 +49,8 @@ public class ApiController {
 	@Operation(
 			summary = "Find a route with the fewest line changes",
 			description = "Finds a route by unique station IDs, minimizing line changes first and adjacent "
-					+ "station stops second. The route includes line legs and fare categories in HK cents "
+					+ "station stops second. Each route leg includes its line and direction (UT or DT). "
+					+ "The route also includes fare categories in HK cents "
                     + "when fare data is available.")
 	@ApiResponses({
 		@ApiResponse(responseCode = "200", description = "Route found"),

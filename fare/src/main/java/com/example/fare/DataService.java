@@ -14,12 +14,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import com.fasterxml.jackson.dataformat.csv.CsvParser;
 import com.fasterxml.jackson.dataformat.csv.CsvSchema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,6 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DataService {
+	private static final Logger logger = LoggerFactory.getLogger(DataService.class);
 	private static final String STATIONS_RESOURCE = "data/mtr_lines_and_stations.csv";
 	private static final String AIRPORT_EXPRESS_LINE_CODE = "AEL";
     private static final String FARES_RESOURCE = "data/mtr_lines_fares.csv";
@@ -37,11 +41,16 @@ public class DataService {
     private final FareTable fareTable;
 
 	public DataService() {
+		long startTime = System.nanoTime();
 		LoadedData data = loadData();
 		stations = data.stations();
 		lines = data.lines();
 		connections = data.connections();
+		logger.info("DataService setup stations and lines in {} ms",
+				TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime));
         fareTable = FareTable.load(new ClassPathResource(FARES_RESOURCE));
+		logger.info("DataService initialized in {} ms",
+				TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime));
 	}
 
     public List<Station> searchStations(String query) {
@@ -89,24 +98,22 @@ public class DataService {
 		}
 
 		List<String> stationIds = new ArrayList<>();
-		List<String> linesByHop = new ArrayList<>();
+		List<Edge> edgesByHop = new ArrayList<>();
 		RouteSearchNode current = destination;
 		stationIds.add(current.state().stationId());
 		while (current.previous() != null) {
-			linesByHop.add(current.state().lineCode());
+			edgesByHop.add(current.edge());
 			current = current.previous();
 			stationIds.add(current.state().stationId());
 		}
 		java.util.Collections.reverse(stationIds);
-		java.util.Collections.reverse(linesByHop);
+		java.util.Collections.reverse(edgesByHop);
 
-		List<Station> routeStations = stationIds.stream().map(stations::get).toList();
 		return new RouteResponse(
 				startStationId,
 				destinationStationId,
-				routeStations.size() - 1,
-				routeStations,
-				buildLegs(stationIds, linesByHop),
+				destination.stops(),
+				buildLegs(stationIds, edgesByHop),
                 fareTable.find(startStationId, destinationStationId));
 	}
 
@@ -117,7 +124,7 @@ public class DataService {
 				byCost.thenComparingLong(RouteSearchNode::order));
 		Map<RouteState, RouteSearchNode> bestRoutes = new HashMap<>();
 		long order = 0;
-		RouteSearchNode start = new RouteSearchNode(new RouteState(startStationId, null), 0, 0, order++, null);
+		RouteSearchNode start = new RouteSearchNode(new RouteState(startStationId, null), 0, 0, order++, null, null);
 		queue.add(start);
 		bestRoutes.put(start.state(), start);
 
@@ -135,7 +142,7 @@ public class DataService {
 						+ (currentLine != null && !currentLine.equals(edge.lineCode()) ? 1 : 0);
 				RouteSearchNode next = new RouteSearchNode(
 						new RouteState(edge.stationId(), edge.lineCode()),
-						transfers, current.stops() + 1, order++, current);
+						transfers, current.stops() + 1, order++, current, edge);
 				RouteSearchNode best = bestRoutes.get(next.state());
 				if (best == null || byCost.compare(next, best) < 0) {
 					bestRoutes.put(next.state(), next);
@@ -146,26 +153,35 @@ public class DataService {
 		return null;
 	}
 
-	private List<RouteLeg> buildLegs(List<String> stationIds, List<String> linesByHop) {
-		if (linesByHop.isEmpty()) {
+	private List<RouteLeg> buildLegs(List<String> stationIds, List<Edge> edgesByHop) {
+		if (edgesByHop.isEmpty()) {
 			return List.of();
 		}
 
 		List<RouteLeg> legs = new ArrayList<>();
-		String currentLine = linesByHop.get(0);
+		String currentLine = edgesByHop.get(0).lineCode();
+		String currentDirection = directionCode(edgesByHop.get(0));
 		List<Station> legStations = new ArrayList<>();
 		legStations.add(stations.get(stationIds.get(0)));
-		for (int hop = 0; hop < linesByHop.size(); hop++) {
+		for (int hop = 0; hop < edgesByHop.size(); hop++) {
 			legStations.add(stations.get(stationIds.get(hop + 1)));
-			if (hop + 1 < linesByHop.size() && !currentLine.equals(linesByHop.get(hop + 1))) {
-				legs.add(new RouteLeg(currentLine, legStations));
-				currentLine = linesByHop.get(hop + 1);
+			if (hop + 1 < edgesByHop.size()
+					&& (!currentLine.equals(edgesByHop.get(hop + 1).lineCode())
+							|| !currentDirection.equals(directionCode(edgesByHop.get(hop + 1))))) {
+				legs.add(new RouteLeg(currentLine, currentDirection, legStations));
+				currentLine = edgesByHop.get(hop + 1).lineCode();
+				currentDirection = directionCode(edgesByHop.get(hop + 1));
 				legStations = new ArrayList<>();
 				legStations.add(stations.get(stationIds.get(hop + 1)));
 			}
 		}
-		legs.add(new RouteLeg(currentLine, legStations));
+		legs.add(new RouteLeg(currentLine, currentDirection, legStations));
 		return List.copyOf(legs);
+	}
+
+	private String directionCode(Edge edge) {
+		String direction = edge.direction();
+		return direction.substring(direction.lastIndexOf('-') + 1);
 	}
 
 	private void validateStationId(String stationId) {
@@ -259,8 +275,8 @@ public class DataService {
 				for (int index = 1; index < sequence.size(); index++) {
 					String previousId = sequence.get(index - 1).station().stationId();
 					String stationId = sequence.get(index).station().stationId();
-					addConnection(loadedConnections, previousId, stationId, lineEntry.getKey());
-					addConnection(loadedConnections, stationId, previousId, lineEntry.getKey());
+					addConnection(loadedConnections, previousId, stationId, lineEntry.getKey(),
+							directionEntry.getKey());
 				}
 			}
 			loadedLines.put(
@@ -280,9 +296,10 @@ public class DataService {
 			Map<String, LinkedHashSet<Edge>> loadedConnections,
 			String stationId,
 			String neighborId,
-			String lineCode) {
+			String lineCode,
+			String direction) {
 		loadedConnections.computeIfAbsent(stationId, ignored -> new LinkedHashSet<>())
-				.add(new Edge(neighborId, lineCode));
+				.add(new Edge(neighborId, lineCode, direction));
 	}
 
 	public record Station(String stationId, String stationCode, String chineseName, String englishName) {
@@ -301,7 +318,7 @@ public class DataService {
 		}
 	}
 
-	public record RouteLeg(String line, List<Station> stations) {
+	public record RouteLeg(String line, String direction, List<Station> stations) {
 		public RouteLeg {
 			stations = List.copyOf(stations);
 		}
@@ -311,23 +328,21 @@ public class DataService {
 			String startStationId,
 			String destinationStationId,
 			int stopCount,
-			List<Station> stations,
 			List<RouteLeg> legs,
             FareTable.FareResponse fare) {
 		public RouteResponse {
-			stations = List.copyOf(stations);
 			legs = List.copyOf(legs);
 		}
 	}
 
-	private record Edge(String stationId, String lineCode) {
+	private record Edge(String stationId, String lineCode, String direction) {
 	}
 
 	private record RouteState(String stationId, String lineCode) {
 	}
 
 	private record RouteSearchNode(
-			RouteState state, int transfers, int stops, long order, RouteSearchNode previous) {
+			RouteState state, int transfers, int stops, long order, RouteSearchNode previous, Edge edge) {
 	}
 
 	private record SequencedStation(int sequence, Station station) {

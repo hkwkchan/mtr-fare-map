@@ -81,6 +81,11 @@ something like "Tuen Mun to Kwun Tong" or "TM to KwunTong". The assistant can us
 The assistant should ask for missing or ambiguous stations. Searches use
 case-insensitive substring matching, not fuzzy matching. Routes minimize
 line changes before stops; fares are in HK cents and can be unavailable.
+Route stations are provided in each leg; transfer stations appear at the end of
+one leg and the start of the next. A route from a station to itself has no legs.
+
+HTTP requests under `/api` are logged with their method, path, status and
+duration. Query parameters are not logged.
 
 ## Test
 

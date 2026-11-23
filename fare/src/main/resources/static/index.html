@@ -61,8 +61,11 @@
                 <tbody id="legs"></tbody>
             </table>
         </section>
-
     </main>
+    <footer>
+        <p>Data source: MTR open data on <a href="https://data.gov.hk/">data.gov.hk</a>.
+            <br>資料來源：data.gov.hk 的港鐵開放數據。</p>
+    </footer>
     <script>
         const form = document.querySelector("#route-form");
         const stationLoading = document.querySelector("#station-loading");
@@ -134,29 +137,11 @@
             scheduleStatus.dataset.error = "false";
 
             try {
-                const lineResponse = await fetch(`/api/lines/${encodeURIComponent(firstLeg.line)}`);
-                if (!lineResponse.ok) {
-                    throw new Error(`Could not load direction information for ${firstLeg.line}.`);
-                }
-                const line = await lineResponse.json();
-                if (currentRequest !== scheduleRequest) {
-                    return;
-                }
-                const origin = firstLeg.stations[0];
-                const nextStation = firstLeg.stations[1];
-                const directions = new Set((line.directions || [])
-                    .filter(({stations: lineStations}) => lineStations.some((station, index) =>
-                        station.stationId === origin.stationId
-                        && lineStations[index + 1]?.stationId === nextStation.stationId))
-                    .map(({direction}) => {
-                        const code = direction.split("-").pop();
-                        return code === "UT" ? "UP" : code === "DT" ? "DOWN" : null;
-                    })
-                    .filter(Boolean));
-                if (directions.size !== 1) {
+                const direction = firstLeg.direction === "UT" ? "UP"
+                    : firstLeg.direction === "DT" ? "DOWN" : null;
+                if (!direction) {
                     throw new Error(`Could not determine the ${firstLeg.line} direction for this route.`);
                 }
-                const [direction] = directions;
 
                 const url = new URL("https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php");
                 url.searchParams.set("line", firstLeg.line);
