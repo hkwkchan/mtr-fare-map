@@ -1,7 +1,7 @@
 # mtr-fare-map
 MTR fare map
 
-After you find a route from start and destination stations, the website displays the route with all passing-by stations and next available train arrival time. A live demo hosting in AWS is at https://daxb9x65xvxw4.cloudfront.net.
+After you find a route from start and destination stations, the website displays the route with all passing-by stations and next available train arrival time. A live demo hosting in AWS is at https://d1o9hg7ev4qh0q.cloudfront.net.
 
 The real-time estimate is provided by the
 [MTR real-time train information API](https://data.gov.hk/en-data/dataset/mtr-data2-nexttrain-data/resource/103472ed-01be-4dda-92c6-30530dee022f), which is updated every 10 seconds.
